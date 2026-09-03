@@ -63,6 +63,95 @@ function NeoSelect({ value, onChange, options, style, placeholder = 'Select Opti
   );
 }
 
+// ==========================================
+// TARGETED NEOMORPHIC DIFFUSION PARTICLES
+// ==========================================
+function NeoParticleEffect({ targetBounds, onComplete }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const particles = [];
+    const colors = ['#E62C5E', '#88A2BC', '#F1F5F9', '#38BDF8'];
+    const particleCount = 70;
+
+    // Use row coordinates or screen center as fallback
+    const originX = targetBounds ? targetBounds.left + targetBounds.width / 2 : canvas.width / 2;
+    const originY = targetBounds ? targetBounds.top + targetBounds.height / 2 : canvas.height / 2;
+    const spreadWidth = targetBounds ? targetBounds.width * 0.8 : 200;
+
+    for (let i = 0; i < particleCount; i++) {
+      particles.push({
+        x: originX + (Math.random() - 0.5) * spreadWidth,
+        y: originY + (Math.random() - 0.5) * 20,
+        vx: (Math.random() - 0.5) * 3,
+        vy: -Math.random() * 3.5 - 1.5, // Ascend upwards
+        size: Math.random() * 4 + 2,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        alpha: 1,
+        fade: Math.random() * 0.025 + 0.015,
+      });
+    }
+
+    let animationFrameId;
+
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      let activeCount = 0;
+
+      particles.forEach((p) => {
+        if (p.alpha > 0) {
+          activeCount++;
+          p.x += p.vx;
+          p.y += p.vy;
+          p.alpha -= p.fade;
+
+          ctx.save();
+          ctx.globalAlpha = Math.max(p.alpha, 0);
+          ctx.fillStyle = p.color;
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = p.color;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      });
+
+      if (activeCount > 0) {
+        animationFrameId = requestAnimationFrame(animate);
+      } else {
+        if (onComplete) onComplete();
+      }
+    };
+
+    animate();
+
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [targetBounds, onComplete]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        pointerEvents: 'none',
+        zIndex: 9999,
+      }}
+    />
+  );
+}
+
 export default function Dashboard({ session, setSession }) {
   const [inventory, setInventory] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -77,6 +166,9 @@ export default function Dashboard({ session, setSession }) {
   const [itemToDelete, setItemToDelete] = useState(null);
   const [editingStockItem, setEditingStockItem] = useState(null);
   const [newStockQty, setNewStockQty] = useState('');
+
+  // Diffusion Effect Target Bounds State
+  const [diffusionBounds, setDiffusionBounds] = useState(null);
 
   const [productName, setProductName] = useState('');
   const [category, setCategory] = useState('Electronics');
@@ -143,12 +235,25 @@ export default function Dashboard({ session, setSession }) {
 
   const confirmDelete = async () => {
     if (itemToDelete) {
+      const targetId = itemToDelete._id;
+      
+      // Get the precise screen location of the row before closing the card
+      const rowElem = document.getElementById(`row-${targetId}`);
+      if (rowElem) {
+        setDiffusionBounds(rowElem.getBoundingClientRect());
+      } else {
+        setDiffusionBounds({ top: window.innerHeight / 2, left: window.innerWidth / 2, width: 300, height: 40 });
+      }
+
+      // Close modal card immediately
+      setItemToDelete(null);
+
       try {
-        const updated = await apiService.deleteInventoryItem(itemToDelete._id);
+        const updated = await apiService.deleteInventoryItem(targetId);
         setInventory(updated);
-        setItemToDelete(null);
       } catch (err) {
         alert(err.message);
+        setDiffusionBounds(null);
       }
     }
   };
@@ -204,6 +309,14 @@ export default function Dashboard({ session, setSession }) {
 
   return (
     <div className="app-shell">
+      {/* Particle Diffusion triggered right as card disappears */}
+      {diffusionBounds && (
+        <NeoParticleEffect
+          targetBounds={diffusionBounds}
+          onComplete={() => setDiffusionBounds(null)}
+        />
+      )}
+
       <aside className="glass-sidebar">
         <div className="sidebar-logo">
           <div className="logo-icon">✦</div>
@@ -298,7 +411,7 @@ export default function Dashboard({ session, setSession }) {
               <tbody>
                 {currentItems.length > 0 ? (
                   currentItems.map(item => (
-                    <tr key={item._id}>
+                    <tr key={item._id} id={`row-${item._id}`}>
                       <td style={{ fontWeight: 700, color: '#a5b4fc', cursor: 'pointer' }} onClick={() => setIsProductDetailsOpen(item)}>
                         {item.productName}
                       </td>
@@ -387,7 +500,7 @@ export default function Dashboard({ session, setSession }) {
           </div>
         )}
 
-        {/* Delete Modal */}
+        {/* Confirm Delete Modal */}
         {itemToDelete && (
           <div className="modal-overlay">
             <div className="glass-modal">
