@@ -85,7 +85,7 @@ app.post('/api/users/register', async (req, res) => {
 });
 
 // Login User / Admin
-app.post('/api/users/login', async (req, res) => {
+app.post(['/api/users/login', '/api/login'], async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -93,12 +93,22 @@ app.post('/api/users/login', async (req, res) => {
       return res.status(400).json({ message: 'Please provide email and password' });
     }
 
-    const user = await User.findOne({ email });
+    const cleanEmail = String(email).trim().toLowerCase();
+    const user = await User.findOne({
+      $or: [
+        { email: cleanEmail },
+        { email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }
+      ]
+    });
+
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
+    const isMatch = (user.password && (user.password.startsWith('$2a$') || user.password.startsWith('$2b$')))
+      ? await bcrypt.compare(password, user.password)
+      : (user.password === password);
+
     if (!isMatch) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
@@ -107,7 +117,7 @@ app.post('/api/users/login', async (req, res) => {
       message: 'Login successful!',
       user: {
         id: user._id,
-        username: user.username,
+        username: user.username || user.name || 'User',
         email: user.email,
         role: user.role,
       },
@@ -118,28 +128,38 @@ app.post('/api/users/login', async (req, res) => {
 });
 
 // Reset Password
-app.post('/api/users/reset-password', async (req, res) => {
+app.post(['/api/users/reset-password', '/api/reset-password'], async (req, res) => {
   try {
-    const { email, newPassword } = req.body;
+    const { email, newPassword, password } = req.body;
+    const passToSet = newPassword || password;
 
-    if (!email || !newPassword) {
+    if (!email || !passToSet) {
       return res.status(400).json({ message: 'Please provide email and new password' });
     }
 
-    const user = await User.findOne({ email });
+    const cleanEmail = String(email).trim().toLowerCase();
+    const user = await User.findOne({
+      $or: [
+        { email: cleanEmail },
+        { email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }
+      ]
+    });
+
     if (!user) {
       return res.status(404).json({ message: 'User with this email does not exist' });
     }
 
     const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(newPassword, salt);
-    await user.save();
+    const hashedPassword = await bcrypt.hash(passToSet, salt);
+    
+    await User.updateOne({ _id: user._id }, { $set: { password: hashedPassword } });
 
     res.json({ message: 'Password updated successfully!' });
   } catch (err) {
     res.status(500).json({ message: 'Error resetting password', error: err.message });
   }
 });
+
 
 // ================= CATEGORY ROUTES =================
 
