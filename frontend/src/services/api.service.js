@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:5000/api';
+const API_URL = "https://fsd-2-project-api.onrender.com/api";
 
 export const apiService = {
   // Session handling
